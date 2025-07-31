@@ -10,6 +10,7 @@ Supports:
 - 🔍 Displaying current config or specific keys
 - 🛡️ Automatic backup of original file
 - 📜 Logging changes made
+-  Changes the internal name of the .3nf to match the filename
 
 ---
 
@@ -118,6 +119,13 @@ python change3mf.py model.3mf --modifications "printer_model=Test" --log
 🔧 Changes made:
  - printer_model: OldPrinter → Test
 ```
+
+---
+## Name Change
+
+The default internal name created by map2model is Exported3DModel.3mf, so every model that is printed shows that name.
+The code will now change the internal name to match the name of the .3mf file, so the printer will show the correct filename in the history.
+To disable the name change use --nonamechange.
 
 ---
 
