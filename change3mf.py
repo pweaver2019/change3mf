@@ -12,19 +12,22 @@
 
 import zipfile
 import json
+import xml.etree.ElementTree as ET
 import argparse
 import os
-import re
+# import re
 import shutil
 
 CONFIG_PATH = 'Metadata/project_settings.config'
+MODEL_SETTINGS = 'Metadata/model_settings.config'
 
 def read_config_json(three_mf_path):
     with zipfile.ZipFile(three_mf_path, 'r') as zf:
         if CONFIG_PATH not in zf.namelist():
             raise FileNotFoundError(f"{CONFIG_PATH} not found in the .3mf file.")
         raw = zf.read(CONFIG_PATH).decode('utf-8-sig')
-        return json.loads(raw)
+        model_xml = zf.read(MODEL_SETTINGS).decode('utf-8-sig')
+        return json.loads(raw),model_xml
 
 def parse_modifications(mod_str):
     modifications = {}
@@ -66,7 +69,20 @@ def show_config(config, element_name=None):
     else:
         print(json.dumps(config, indent=2))
 
-def save_modified_3mf(original_path, config_data, create_backup=True):
+# Function to parse the XML and return an ElementTree object
+def parse_config_xml(config_data):
+    return ET.ElementTree(ET.fromstring(config_data))
+
+def update_xml_metadata(root, key, value):
+
+    for item in root:
+        for elem in item:
+            if elem.tag == 'metadata':
+#   Replace the original name in the XML with the name of the 3MF file
+                if elem.attrib.get('key') == 'name':
+                    elem.attrib['value'] = value
+
+def save_modified_3mf(original_path, config_data, xml, create_backup=True, namechange=True):
     if create_backup:
         backup_path = original_path + ".bak"
         shutil.copy2(original_path, backup_path)
@@ -75,11 +91,20 @@ def save_modified_3mf(original_path, config_data, create_backup=True):
     with zipfile.ZipFile(original_path, 'r') as original_zip:
         temp_path = original_path + ".tmp"
         with zipfile.ZipFile(temp_path, 'w') as new_zip:
+
             for item in original_zip.namelist():
-                if item != CONFIG_PATH:
-                    new_zip.writestr(item, original_zip.read(item))
+                if item == CONFIG_PATH:
+                    new_zip.writestr(CONFIG_PATH, json.dumps(config_data))
                 else:
-                    new_zip.writestr(CONFIG_PATH, json.dumps(config_data, indent=2))
+                    if item == MODEL_SETTINGS and namechange:
+                        tree = parse_config_xml(xml)
+                        root = tree.getroot()
+                        update_xml_metadata(root,'name',os.path.splitext(os.path.basename(original_path))[0])
+                        xml_bytes = ET.tostring(root, encoding='utf-8', method='xml')
+                        new_zip.writestr(item, xml_bytes.decode('utf-8'))
+                    else:
+                        new_zip.writestr(item, original_zip.read(item))
+
     os.replace(temp_path, original_path)
     print(f"✅ Changes saved to: {original_path}")
 
@@ -92,11 +117,12 @@ def main():
     parser.add_argument('--element', help="Specific element to show.")
     parser.add_argument('--log', action='store_true', help="Log changes made to the config.")
     parser.add_argument('--nobackup', action='store_true', help="Do not create a .bak backup of the original file.")
+    parser.add_argument('--nonamechange', action='store_true', help="Do not change the name in the XML metadata to match the filename.")
 
     args = parser.parse_args()
 
     try:
-        config = read_config_json(args.three_mf_file)
+        config,xml = read_config_json(args.three_mf_file)
 
         if args.show:
             show_config(config, args.element)
@@ -110,7 +136,7 @@ def main():
                 raise ValueError("You must provide either --modifications or --config-from-file")
 
             config, changes = modify_config(config, modifications, enable_log=args.log)
-            save_modified_3mf(args.three_mf_file, config, create_backup=not args.nobackup)
+            save_modified_3mf(args.three_mf_file, config, xml, create_backup=not args.nobackup, namechange=not args.nonamechange)
 
             if args.log:
                 print("\n🔧 Changes made:")
